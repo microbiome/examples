@@ -1,0 +1,172 @@
+---
+title: "Microbiome Data Science with R/Bioconductor"
+format: 
+  html:
+    code-fold: true
+    self-contained: true
+editor: visual
+---
+
+## Task 1: Reproducible reporting
+
+```{r load_iris}
+data("iris")
+
+head(iris, 10)
+```
+
+```{r plot_iris}
+library(ggplot2)
+
+plot <- ggplot(data = iris, aes(x = Sepal.Length, y = Sepal.Width, color = Species)) +
+  geom_point()
+
+plot
+```
+
+## Task 2: Access and manipulation
+
+```{r load_data_from_mia}
+# Load mia package
+library(mia)
+
+# Load experimental data from mia
+data("peerj13075")
+
+# Save it to variable
+tse <- peerj13075
+tse
+```
+
+```{r data_summary}
+summary <- summary(tse)
+
+summary$samples
+
+summary$features
+```
+
+```{r taxa_name}
+head( rownames(tse) )
+```
+
+```{r sample_name}
+head( colnames(tse) )
+```
+
+```{r dimensions}
+dim(tse)
+```
+
+### Data elements
+
+Now we can access the data inside the data container
+
+```{r assay_name}
+assayNames(tse)
+```
+
+```{r access_assay}
+# Get counts assay
+
+# Use head to print first five
+
+head( assay(tse, "counts"), 5 )
+```
+
+We can also mix text and r commands. We have  `r assayNames(tse)` assay in our
+assays slot of TreeSummarizedExperiment data container.
+
+```{r sample_metadata}
+head( colData(tse) )
+```
+
+```{r pick_columns_from_colData}
+# We can access columns with basic data.frame way
+colData(tse)$Gender
+# colData(tse)[ , "Gender"]
+
+# Or we can use shorter version (directly from tse object without first specifying colData)
+# and summarize variable with table function
+table(tse$Gender)
+```
+
+```{r feature_metadata}
+head(rowData(tse))
+```
+
+```{r subset_row}
+# Choose certain taxa
+tse_sub <- tse[rowData(tse)$genus %in% c("Abiotrophia", "Acetonema"), ]
+tse_sub
+```
+
+```{r subset_col}
+# Choose age over 30
+tse_sub <- tse[ , colData(tse)$Age > 30 ]
+tse_sub
+```
+
+```{r subset_row_and_col}
+# Get the subsetted TreeSE
+# First ten row/taxa, and only males
+tse_sub <- tse[1:10, tse$Gender == "Male"]
+tse_sub
+```
+
+```{r prevalent_taxa}
+# Subset based on prevalent taxa
+tse_sub <- subsetByPrevalentTaxa(tse, rank = "phylum")
+tse_sub
+```
+
+```{r prevalence}
+# Get prevalence
+prevalence <- getPrevalence(tse, rank = "phylum", detection = 0.05)
+
+plot(prevalence)
+```
+
+REMEMBER TO SUMMARIZE THE RESULTS:
+There are couple of taxa that have high prevalence. 
+
+```{r library_size}
+# We can calculate the library size i.e. the number of bacteria found
+# We can calculate it by colSums or with scater package functions
+colsums <- colSums2(assay(tse, "counts"))
+# Store to colData
+colData(tse)$lib_size <- colsums
+
+# Calculate library size with scater package 
+# (It has also much more functionality, e.g. plotColData)
+library(scater)
+tse <- addPerCellQC(tse)
+
+# Show colData 
+head( colData(tse) )
+```
+
+```{r plot_library_size}
+plotColData(tse, "total")
+```
+
+Now we can transform the data. There are multiple options run `help(transformSamples)`
+to see the options.
+
+```{r log10_transform}
+# Avoid hard-coding! When we use variables, we can more easily change adapt the code
+# to other situation
+method <- "log10"
+pseudocount = 1
+
+# Transform the data
+tse <- transformSamples(tse, method = method, pseudocount = pseudocount)
+
+# Now we have two assays
+assayNames(tse)
+```
+
+The maximum value of our `r method` assay is `r max(assay(tse, method))` and minimum
+value is `r min(assay(tse, method))` the mean being `r mean(assay(tse, method))`. 
+Now we do not have to modify all the arguments, we can just modify one variable.
+That is why we avoid hard-coding. 
