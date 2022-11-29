@@ -1,0 +1,191 @@
+---
+title: "Day 2: example solutions"
+format: 
+  html:
+    code-fold: true
+    self-contained: true
+editor: visual
+---
+
+
+## Importing data (OMA 18.3.1-3)
+
+Define file paths.
+
+```{r data_paths}
+# Paths for files
+rdfile <- "shared/data/rowdata_taxa.csv"
+cdfile <- "shared/data/coldata.csv"
+assayfile <- "shared/data/assay_taxa.csv"
+```
+
+
+
+
+```{r create_TreeSE_from_CSV}
+# Read row data file;
+# define that the first column is moved to rownames
+rowdata <- read.csv(rdfile, row.names=1)
+head(rowdata)
+
+# Read column data file;
+# define that the first column is moved to rownames
+coldata <- read.csv(cdfile, row.names=1)
+head(coldata)
+
+# Read abundance data file
+# and convert it into numeric matrix
+X <- read.csv(assayfile, row.names=1)
+X <- as.matrix(X)
+
+# Create a TreeSE;
+# Abundance data is provided as a simple list, with one assay ("counts")
+# row and col data are provided as DataFrame (different from data.frame)
+tse <- TreeSummarizedExperiment(assays  = SimpleList(counts = X), 
+                                rowData = DataFrame(rowdata),
+                                colData = DataFrame(coldata))
+
+print(tse)
+```
+
+## 18.3 / 4 Data import from other formats (task 4) 
+
+
+Another example, importing biom files and incorporating phylogenetic tree.
+
+```{r import_biom_file}
+# Load the BIOM file directly into TreeSE format
+tse2 <- loadFromBiom("shared/data/Aggregated_humanization2.biom")
+
+# The data includes also phylogenetic tree
+# Read the tree with the ape package
+tree <- ape::read.tree("shared/data/Data_humanization_phylo_aggregation.tre")
+# Add tree to the TreeSE object:
+rowTree(tse2) <- tree
+print(tse2)
+```
+
+
+
+## 18.3.5 Conversions between TreeSE & phyloseq data containers
+
+Convert TreeSE to phyloseq and back.
+
+```{r TreeSE_to_pseq}
+# Make phyloseq object from TreeSummarizedExperiment
+pseq <- makePhyloseqFromTreeSummarizedExperiment(tse)
+pseq
+```
+
+```{r pseq_to_TreeSE}
+# Make TreeSE from pseq
+tse <- makeTreeSEFromPhyloseq(pseq)
+tse
+```
+
+
+
+## Transformations (18.5)
+
+We add some transformations into new assays in the data
+
+```{r trans}
+# Add relative abundances in the data as a new assay
+assayNames(tse) # Check assay names
+tse <- transformSamples(tse, method = "relabundance")
+assayNames(tse) # Check assay names again
+
+# Add CLR transformation in the data as a new assay; you need pseudocount for CLR
+tse <- transformSamples(tse, method = "clr", pseudocount=1)
+assayNames(tse) # Check assay names again
+```
+
+Subsetting applies directly to all assays:
+
+
+```{r trans}
+tse.subset <- tse[1:27, 1:17]
+dim(assay(tse.subset, “counts”))
+dim(assay(tse.subset, “relabundance”))
+dim(assay(tse.subset, “clr”))
+```
+
+
+
+## Diversity estimation (OMA 18.7)
+
+Richness:
+
+```{r richness}
+# Check coldata before adding richness
+head(colData(tse))
+
+tse <- mia::estimateRichness(tse, 
+                             assay_name = "counts", 
+                             index = "observed", 
+                             name="observed")
+
+# Now new field, "observed" has appeared
+head(colData(tse))
+```
+
+
+
+
+```{r richness}
+tse <- mia::estimateDiversity(tse, 
+                             assay_name = "counts", # Calculate diversity from "counts" assay 
+                             index = "shannon")     # Use Shannon index
+
+head(colData(tse))
+```
+
+
+Phylogenetic (Faith) diversity index that uses tree information
+(available in e.g. GlobalPatterns demo data set).
+
+```{r faith}
+library(mia)
+data(GlobalPatterns)
+tse3 <- mia::estimateFaith(GlobalPatterns, assay_name = "counts")
+head(colData(tse3))
+```
+
+
+
+
+Visualize Shannon diversity against selected background variables from colData.
+
+```{r visualize_shannon}
+library(scater)
+plotColData(tse, "shannon", "Diet", colour_by = "Fat") +
+    theme(axis.text.x = element_text(angle=45,hjust=1)) + 
+    ylab(expression(Richness[Observed]))
+
+```
+
+
+```{r visualize_shannon2}
+library(ggsignif)
+
+df <- colData(tse)
+
+comb <- split(t(combn(unique(tse$Fat), 2)), 
+           seq(nrow(t(combn(unique(tse$Fat), 2)))))
+
+ggplot(as.data.frame(colData(tse)), aes(x = Fat, y = shannon)) +
+  # Outliers are removed, because otherwise each data point would be plotted twice; 
+  # as an outlier of boxplot and as a point of dotplot.
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(width = 0.2) + 
+  geom_signif(comparisons = comb, map_signif_level = FALSE) +
+  theme(text = element_text(size = 10))
+```
+
+
+
+
+
+
+
+
