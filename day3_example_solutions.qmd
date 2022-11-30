@@ -1,0 +1,221 @@
+---
+title: "Day 3 example solutions"
+format: 
+  html:
+    code-fold: true
+    self-contained: true
+    toc: true
+editor: visual
+---
+
+# Day 3
+
+## 18.6 Taxonomic levels
+
+### Agglomeration
+
+```{r tax1}
+# Load example data
+library(mia)
+data(GlobalPatterns)
+tse <-GlobalPatterns
+
+# List available taxonomic ranks
+taxonomyRanks(tse)
+
+# We can also look them from rowData
+colnames(rowData(tse))
+```
+
+```{r tax2}
+# Agglomerate tse to Phylum level
+tse_phylum <- agglomerateByRank(tse, rank = "Phylum")
+
+# Check dimensions before and after
+dim(tse)
+dim(tse_phylum)
+```
+
+We have now less features/rows than before in the new aggregated object.
+
+If we had CLR assay, we got a warning "'clr' includes negative values. Agglomeration of it might lead to meaningless values. Check the assay, and consider doing transformation again manually with agglomerated data"
+
+In practice, we have to perform CLR transformation to Phylum level again.
+
+```{r tax3}
+# Relative abundance transformation for phyla (with pseudocount 1)
+tse_phylum <- transformSamples(tse_phylum, method = "relabundance", 
+                               pseudocount = 1, name = "rel_pseudo")
+
+# Create clr transformed data from the relative abundances			       
+tse_phylum <- transformSamples(tse_phylum, method = "clr", assay_name = "rel_pseudo")
+```
+
+That is why we use altExp slot and store phylum level data there, so that we do not have to do e.g., these transformations again.
+
+You can also check taxonomic mappings for a given taxonomic feature.
+
+```{r tax5}
+mapTaxonomy(tse, taxa="Cenarchaeales")
+```
+
+### Alternative experiments (altExp)
+
+Let us first add one new alternative experiment in the TreeSE object.
+
+```{r tax4}
+# Add agglomerated data as an altExp to the original tse
+altExp(tse, "phylum") <- tse_phylum
+
+# check the available alternative experiments in this TreeSE object
+altExpNames(tse)
+```
+
+With splitByRanks we can add taxonomic abundance tables for all ranks at once.
+
+Note that the available assays will be created for all tables as well.
+
+```{r altexp1}
+# Agglomerate and split data into ranks
+list_of_ranks <- splitByRanks(tse)
+
+# Add the list to altExp slot
+altExps(tse) <- list_of_ranks
+
+altExpNames(tse)
+```
+
+Next, let us show how to pick a given assay from altExp.
+
+```{r altexp2}
+# Pick experiment
+tse_genus <- altExp(tse, "Genus")
+# Pick assay
+assayNames(tse)
+assay <- assay(tse_genus, method="relabundance")
+assay[1:3, 1:3]
+```
+
+We can also split data based on other properties.
+
+```{r altexp3}
+# Create arbitrary groups and add info to rowData
+rowData(tse)$pathogenicity <- rep(c("pathogen", "good"), times = nrow(tse)/2)
+
+# Split the data on group information
+list <- splitOn(tse, f = "pathogenicity")
+# List of TreeSE objects that are splitted based on pathogenicity
+list
+```
+
+## Beta diversity
+
+```{r beta1}
+library(scater)
+
+# Load experimental data
+data("peerj13075")
+tse <- peerj13075
+
+# Transform data
+method <- "relabundance"
+tse <- transformSamples(tse, method = method)
+
+# Perform PCoA
+diss_method <- "bray"
+tse <- runMDS(tse,
+              FUN = vegan::vegdist, 
+              method = diss_method, 
+              name = "PCoA_BC", 
+              exprs_values = method)
+
+# Plot
+plotReducedDim(tse, "PCoA_BC") +
+  labs(title = "Bray-Curtis")
+```
+
+```{r beta2}
+# Add dominant taxa for each sample
+tse <- addPerSampleDominantTaxa(tse, rank = "phylum")
+
+# Plot
+plotReducedDim(tse, "PCoA_BC", colour_by = "dominant_taxa") +
+  labs(title = "Bray-Curtis")
+```
+
+```{r beta2}
+# Color just one selected taxa if it is dominant (TRUE / FALSE)
+# Let us create a new colData field, which shows whether Proteobacteria are dominant (yes or no)
+colData(tse)$Proteobacteria <- unlist(colData(tse)$dominant_taxa == "Phylum:Proteobacteria")
+
+# Plot
+library(scater)
+plotReducedDim(tse, "PCoA_BC", colour_by = "Proteobacteria") + labs(title = "Proteos highlighted")
+```
+
+```{r beta3}
+# Transform data
+tse <- transformSamples(tse, method = "relabundance", pseudocount = 1)
+tse <- transformSamples(tse, method = "clr", assay_name = "relabundance")
+
+# Perform PCoA
+diss_method <- "euclidean"
+method <- "clr"
+tse <- runMDS(tse,
+              FUN = vegan::vegdist, 
+              method = diss_method, 
+              name = "PCoA", 
+              exprs_values = method)
+
+# Plot
+plotReducedDim(tse, "PCoA", colour_by = "Geographical_location") +
+  labs(title = "Aitchison")
+```
+
+It looks like there is difference between groups. Let's test that with PERMANOVA.
+
+```{r beta4}
+# Set seed for reproducibility
+set.seed(1576)
+
+# Perform permanova
+library(vegan)
+permanova <- adonis2(t(assay(tse, method)) ~ Geographical_location,
+                     by = "margin",
+                     data = colData(tse),
+                     method = diss_method,
+                     permutations = 999)
+
+permanova
+```
+
+```{r beta5}
+# Test homogeneity
+anova( betadisper(
+  vegdist(t(assay(tse, method)), method = diss_method), 
+  colData(tse)$Geographical_location)
+  )
+```
+
+Groups have similar dispersion/variance (p\>0.05). PERMANOVA is appropriate test.
+
+## Dirichlet Multinomial Mixture
+
+```{r dmn1}
+# Run DMN analysis
+tse <- runDMN(tse, k = 1:5)
+
+# Plot DMN result
+library(miaViz)
+plotDMNFit(tse, type = "laplace")
+```
+
+```{r dmn2}
+# Get clusters and add them to colData
+probs <- DirichletMultinomial::mixture(getBestDMNFit(tse))
+colData(tse)$clusters <- factor( apply(probs, 1, which.max) )
+
+# Plot
+plotReducedDim(tse, "PCoA", colour_by = "clusters") +
+  labs(title = "Aitchison")
+```
